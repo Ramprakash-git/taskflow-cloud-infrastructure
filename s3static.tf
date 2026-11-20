@@ -31,7 +31,7 @@ data "aws_iam_policy_document" "s3_oac" {
   statement {
     principals {
       type        = "Service"
-      identifiers = ["cloudffront.amazonaws.com"]
+      identifiers = ["cloudfront.amazonaws.com"]
     }
 
     condition {

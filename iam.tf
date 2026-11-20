@@ -189,7 +189,7 @@ data "aws_iam_policy_document" "github_actions_trust_policy" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:Ramprakash-git/taskflow-backend:ref:refs/heads/master"]
+      values   = ["repo:Ramprakash-git@304885229/taskflow-backend@1456259740:ref:refs/heads/master"]
     }
   }
 }
@@ -210,7 +210,8 @@ data "aws_iam_policy_document" "github_actions_cib_permissions_policy" {
       "ecr:InitiateLayerUpload",
       "ecr:UploadLayerPart",
       "ecr:CompleteLayerUpload",
-      "ecr:PutImage"
+      "ecr:PutImage",
+      "ecr:BatchGetImage"
     ]
     resources = [aws_ecr_repository.taskflow_repo.arn]
   }
@@ -273,7 +274,7 @@ data "aws_iam_policy_document" "github_actions_cdf_trust_policy" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:Ramprakash-git/taskflow-frontend:ref:refs/heads/master"]
+      values   = ["repo:Ramprakash-git@304885229/taskflow-frontend@1430669413:ref:refs/heads/master"]
     }
   }
 }
@@ -293,7 +294,7 @@ data "aws_iam_policy_document" "github_actions_cdf_permission_policy" {
 
   statement {
     effect    = "Allow"
-    actions   = ["cloudffront:CreateInvalidation"]
+    actions   = ["cloudfront:CreateInvalidation"]
     resources = [aws_cloudfront_distribution.main.arn]
   }
 }
@@ -312,3 +313,135 @@ resource "aws_iam_role_policy_attachment" "github_actions_cdf" {
   role       = aws_iam_role.github_actions_cdf.name
   policy_arn = aws_iam_policy.github_actions_cdf.arn
 }
+
+data "aws_iam_policy_document" "github_actions_k8s_trust_policy" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:Ramprakash-git@304885229/taskflow-kubernetes@1458773049:ref:refs/heads/master"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "github_actions_k8s_permission_policy" {
+  statement {
+    effect    = "Allow"
+    actions   = ["eks:DescribeCluster"]
+    resources = [aws_eks_cluster.main.arn]
+  }
+}
+
+resource "aws_iam_role" "github_actions_k8s_cd" {
+  name               = "github-actions-k8s-role"
+  assume_role_policy = data.aws_iam_policy_document.github_actions_k8s_trust_policy.json
+}
+
+resource "aws_iam_policy" "github_actions_k8s_cd" {
+  name   = "github-actions-k8s-policy"
+  policy = data.aws_iam_policy_document.github_actions_k8s_permission_policy.json
+}
+
+resource "aws_iam_role_policy_attachment" "github_actions_k8s_cd" {
+  role       = aws_iam_role.github_actions_k8s_cd.name
+  policy_arn = aws_iam_policy.github_actions_k8s_cd.arn
+}
+
+data "aws_iam_policy_document" "cluster_autoscaler_trust_policy" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.eks.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(aws_iam_openid_connect_provider.eks.url, "https://", "")}:sub"
+      values   = ["system:serviceaccount:kube-system:cluster-autoscaler"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "cluster_autoscaler_permission_policy" {
+
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "autoscaling:DescribeAutoScalingGroups",
+      "autoscaling:DescribeAutoScalingInstances",
+      "autoscaling:DescribeLaunchConfigurations",
+      "autoscaling:DescribeScalingActivities",
+      "autoscaling:DescribeTags",
+      "ec2:DescribeImages",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeLaunchTemplateVersions",
+      "ec2:GetInstanceTypesFromInstanceRequirements",
+      "eks:DescribeNodegroup"
+    ]
+
+    resources = ["*"]
+  }
+
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "autoscaling:SetDesiredCapacity",
+      "autoscaling:TerminateInstanceInAutoScalingGroup"
+    ]
+
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/k8s.io/cluster-autoscaler/enabled"
+      values   = ["true"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/k8s.io/cluster-autoscaler/taskflow-eks"
+      values   = ["owned"]
+    }
+  }
+}
+
+resource "aws_iam_role" "cluster_autoscaler" {
+  name               = "taskflow-cluster-autoscaler-role"
+  assume_role_policy = data.aws_iam_policy_document.cluster_autoscaler_trust_policy.json
+}
+
+resource "aws_iam_policy" "cluster_autoscaler" {
+  name   = "taskflow-cluster-autoscaler-policy"
+  policy = data.aws_iam_policy_document.cluster_autoscaler_permission_policy.json
+}
+
+resource "aws_iam_role_policy_attachment" "cluster_autoscaler" {
+  role       = aws_iam_role.cluster_autoscaler.name
+  policy_arn = aws_iam_policy.cluster_autoscaler.arn
+}
+

@@ -6,7 +6,7 @@ resource "aws_eks_cluster" "main" {
   vpc_config {
     endpoint_private_access = true
     endpoint_public_access  = true
-    public_access_cidrs     = ["157.49.240.222/32"]
+    public_access_cidrs     = ["0.0.0.0/0"]
 
     subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
   }
@@ -106,4 +106,25 @@ resource "aws_eks_access_policy_association" "github_actions_cdb" {
   }
 
   depends_on = [aws_eks_access_entry.github_actions_cdb]
+}
+
+resource "aws_eks_access_entry" "github_actions_k8s_cd" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = aws_iam_role.github_actions_k8s_cd.arn
+  type          = "STANDARD"
+
+  kubernetes_groups = ["github-actions-kube-system"]
+}
+
+resource "aws_eks_access_policy_association" "github_actions_k8s_cd" {
+  cluster_name  = aws_eks_cluster.main.name
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
+  principal_arn = aws_iam_role.github_actions_k8s_cd.arn
+
+  access_scope {
+    type       = "namespace"
+    namespaces = ["taskflow"]
+  }
+
+  depends_on = [aws_eks_access_entry.github_actions_k8s_cd]
 }
